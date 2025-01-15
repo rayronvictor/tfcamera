@@ -31,6 +31,8 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="camera-classifier" options={{ title: "Classifier" }} />
+        <Stack.Screen name="camera-segmentation" options={{ title: "Segmentation" }} />
         <Stack.Screen name="+not-found" />
       </Stack>
       <StatusBar style="auto" />

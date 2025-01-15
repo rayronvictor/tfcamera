@@ -44,6 +44,7 @@ export default function TabLayout() {
         name="camera"
         options={{
           title: 'Camera',
+          headerShown: true,
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="camera.fill" color={color} />,
         }}
       />
