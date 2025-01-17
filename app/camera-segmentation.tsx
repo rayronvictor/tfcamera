@@ -1,45 +1,39 @@
-import { Platform, StyleSheet } from 'react-native';
+import {Platform, StyleSheet} from 'react-native';
 import {
   Camera,
-  runAsync, runAtTargetFps,
+  runAtTargetFps,
   useCameraDevice,
   useCameraPermission,
   useSkiaFrameProcessor,
 } from "react-native-vision-camera";
 import {useResizePlugin} from "vision-camera-resize-plugin";
-import {useImageLabeler} from "react-native-vision-camera-v3-image-labeling";
-import {Canvas, createPicture, matchFont, PaintStyle, Picture, Skia, SkSize,} from "@shopify/react-native-skia";
-import {Worklets} from "react-native-worklets-core";
-import {Label} from "react-native-vision-camera-v3-image-labeling/src/types";
-import {useDerivedValue, useSharedValue} from "react-native-reanimated";
+import {matchFont, PaintStyle, Skia} from "@shopify/react-native-skia";
+
 import {NoCameraDeviceError, PermissionRequest} from "@/components/PermissionRequest";
 import {useTensorflowModel} from "react-native-fast-tflite";
-
 
 const fontFamily = Platform.select({ ios: 'Helvetica', default: 'serif' });
 const font = matchFont({
   fontFamily,
-  // fontFamily: 'serif',
   fontSize: 12,
   fontStyle: "italic",
   fontWeight: 'bold',
 });
 
+const paint = Skia.Paint()
+paint.setStyle(PaintStyle.Stroke)
+paint.setStrokeWidth(4);
+
+const COLORS = ['red', 'blue', 'green', 'yellow', 'purple'];
+
 export default function CameraSegmentationScreen() {
   const {hasPermission} = useCameraPermission()
 
-  const device = useCameraDevice('back')
+  const device = useCameraDevice("back");
 
   const { resize } = useResizePlugin()
-  // Option B: Hook in a Function Component
   const { model, state } = useTensorflowModel(require('../assets/models/yolov11_seg.tflite'))
-  const { scanImage } = useImageLabeler({ minConfidence: 0.1 })
 
-  const canvasSize = useSharedValue<SkSize>({ width: 0, height: 0 });
-  const labels = useSharedValue<Label | null>(null);
-  const updateLabelValue = Worklets.createRunOnJS((value: Label) => {
-    labels.value = value;
-  })
 
   const frameProcessor = useSkiaFrameProcessor((frame) => {
     'worklet'
@@ -51,6 +45,7 @@ export default function CameraSegmentationScreen() {
     }
 
     // runAsync(frame, () => {
+
     runAtTargetFps(1, () => {
       'worklet'
 
@@ -60,80 +55,64 @@ export default function CameraSegmentationScreen() {
           height: 640,
         },
         pixelFormat: 'rgb',
-        dataType: 'uint8'
+        dataType: 'float32', // YOLOv11 uses float32
       })
 
-      console.log("antes")
+      const [boxes, scores, masks, class_idx, protos] = model?.runSync([resized])
 
-      const result = model.runSync([resized])
+      const scoreIdxs = filterByConfidence(scores, 0.5)
 
-      console.log("depois")
+      console.log(JSON.stringify(scoreIdxs, null, 2))
 
-      console.log(JSON.stringify(result[2], null, 2));
+      // const maxScoreIdx = scores.reduce((maxScoreIdx: number, current: number, idx: number, arr: Float32Array<ArrayBufferLike>) => {
+      //   return current > arr[maxScoreIdx] ? idx : maxScoreIdx;
+      // }, 0)
 
-      // if (result) {
-      //   console.log(JSON.stringify(result, null, 2));
-      // }
 
-      // const num_detections = result[3]?.[0] ?? 0
 
-      // console.log('Result: ' + num_detections)
+      for(let i = 0; i < scoreIdxs?.length; i++) {
+        // multiply the index by 4 (xc, yc, width, height => 4 values)
+        const boxPos = scoreIdxs[i] * 4
+        const xc = Number(boxes[boxPos])
+        const yc = Number(boxes[boxPos + 1])
+        const width = Number(boxes[boxPos + 2])
+        const height = Number(boxes[boxPos + 3])
 
-      // model?.run()
-      // updateLabelValue(scanImage(frame))
+        console.log(`Idx: ${i}, score: ${scores[scoreIdxs[i]]}, class: ${class_idx[scoreIdxs[i]]}`)
+        console.log(JSON.stringify(`Box: { xc: ${xc}, yc: ${yc}, w: ${width}, h: ${height} }`, null, 2));
+
+        paint.setColor(Skia.Color(COLORS[i]))
+
+        const rect = Skia.XYWHRect(xc - width / 2, yc - height / 2, width, height);
+        frame.drawRect(rect, paint);
+      }
     })
 
   }, [state, model])
-
-  // const pictures = useDerivedValue(() => {
-  //   return createPicture((canvas) => {
-  //     if(labels.value !== null  && Object.keys(labels).length > 0) {
-  //
-  //       const label = labels.value[0];
-  //
-  //       if (label.confidence > 0.75) {
-  //         // console.log(`You're looking at a ${label.label} with confidence of ${label.confidence.toPrecision(2)}.`)
-  //
-  //         const text = `${label.label} ${label.confidence.toPrecision(2)}`;
-  //
-  //         const paint = Skia.Paint()
-  //
-  //         const textRect = font.measureText(text, paint)
-  //         const centerX = (canvasSize.value.width / 2) - (textRect.width / 2)
-  //         const centerY = canvasSize.value.height * 0.1
-  //
-  //         // Draw text background
-  //         paint.setColor(Skia.Color('black'))
-  //         const rect = Skia.XYWHRect(centerX - 5, centerY - 15, textRect.width + 10, 20);
-  //         canvas.drawRect(rect, paint);
-  //
-  //         // Draw text
-  //         paint.setColor(Skia.Color('white'))
-  //         canvas.drawText(`${label.label} ${label.confidence.toPrecision(2)}`, centerX, centerY, paint, font)
-  //       }
-  //     }
-  //   })
-  // })
 
   if (!hasPermission) return <PermissionRequest />
   if (device == null) return <NoCameraDeviceError />
 
   return (
-    <>
-      <Camera
-        enableFpsGraph={__DEV__}
-        style={StyleSheet.absoluteFill}
-        device={device}
-        isActive={true}
-        frameProcessor={frameProcessor}
-      />
-
-      <Canvas
-        style={StyleSheet.absoluteFill}
-        onSize={canvasSize}
-      >
-        {/*<Picture picture={pictures} />*/}
-      </Canvas>
-    </>
+    <Camera
+      enableFpsGraph={__DEV__}
+      style={StyleSheet.absoluteFill}
+      device={device}
+      isActive={true}
+      frameProcessor={frameProcessor}
+    />
   );
+}
+
+function filterByConfidence(arr: Float32Array<ArrayBufferLike>, confidence = 0.5) {
+  'worklet'
+
+  return Array.from(arr)
+    .map((value, index) => {
+      if (value >= confidence) {
+        return index
+      }
+    })
+    // filter undefined
+    .filter((item) => item !== undefined)
 }
